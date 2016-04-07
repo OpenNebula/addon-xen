@@ -1,0 +1,393 @@
+#!/usr/bin/env ruby
+
+# -------------------------------------------------------------------------- #
+# Copyright 2002-2015, OpenNebula Project, OpenNebula Systems                #
+#                                                                            #
+# Licensed under the Apache License, Version 2.0 (the "License"); you may    #
+# not use this file except in compliance with the License. You may obtain    #
+# a copy of the License at                                                   #
+#                                                                            #
+# http://www.apache.org/licenses/LICENSE-2.0                                 #
+#                                                                            #
+# Unless required by applicable law or agreed to in writing, software        #
+# distributed under the License is distributed on an "AS IS" BASIS,          #
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.   #
+# See the License for the specific language governing permissions and        #
+# limitations under the License.                                             #
+#--------------------------------------------------------------------------- #
+
+$: << File.join(File.dirname(__FILE__), '../lib')
+
+require 'pp'
+require 'rexml/document'
+require 'base64'
+require 'uri'
+
+require "poll_common"
+
+begin
+    require 'rubygems'
+    require 'json'
+
+    JSON_LOADED = true
+rescue LoadError
+    JSON_LOADED = false
+end
+
+ENV['LANG']='C'
+ENV['LC_ALL']='C'
+
+################################################################################
+#
+#  Xen Monitor Module
+#
+################################################################################
+module XEN
+    # Default configuration variables. It can be overridden through xenrc
+    CONF={
+        'XM_POLL' => 'sudo /usr/sbin/xentop -bi2'
+    }
+
+    # Get the information of a single VM. In case of error the VM is reported
+    # as not found.
+    # @param vm_id [String] with the VM information
+    def self.get_vm_info(vm_id)
+        data = get_all_vm_info
+
+        if !data
+            return {:STATE => 'd'}
+        else
+            return data[vm_id]
+        end
+    end
+
+    # Gets the information of all VMs
+    #
+    # @return [Hash, nil] Hash with the VM information or nil in case of error
+    def self.get_all_vm_info
+        begin
+            begin
+                list_long = get_vm_list_long
+            rescue
+                list_long = []
+            end
+
+            vm_templates = get_vm_templates(list_long)
+            vm_disk_stats = get_vm_disk_stats(list_long)
+
+            text  = `#{CONF['XM_POLL']}`
+
+            return nil if $?.exitstatus != 0
+
+            lines = text.strip.split("\n")
+
+            block_size  = lines.length/2
+            valid_lines = lines.last(block_size)
+
+            first_domain = 4
+
+            valid_lines.each_with_index{ |l,i|
+                if l.match 'NAME  STATE'
+                    first_domain=i+1
+                    break
+                end
+            }
+
+            domain_lines = valid_lines[first_domain..-1]
+
+            domains = Hash.new
+
+            domain_lines.each do |dom|
+                dom_data = dom.gsub('no limit', 'no-limit').strip.split
+
+                name = dom_data[0]
+
+                dom_hash = Hash.new
+
+                dom_hash[:name]    = name
+                dom_hash[:vm_name] = name
+                dom_hash[:state]   = get_state(dom_data[1])
+                dom_hash[:cpu]     = dom_data[3]
+                dom_hash[:memory]  = dom_data[4]
+                dom_hash[:nettx]   = dom_data[10].to_i * 1024
+                dom_hash[:netrx]   = dom_data[11].to_i * 1024
+
+                if !name.match(/^one-\d/) && vm_templates[name]
+                    dom_hash[:template] =
+                        Base64.encode64(vm_templates[name]).delete("\n")
+                end
+
+                dom_hash.merge!(vm_disk_stats[name]) if vm_disk_stats[name]
+
+                domains[name] = dom_hash
+            end
+
+            domains
+        rescue
+            STDERR.puts "Error executing #{CONF['XM_POLL']}"
+            nil
+        end
+    end
+
+    # Returns an OpenNebula state from the Xen status
+    # @param state [String] with the Xen status
+    # @return [String] OpenNebula monitor state
+    #
+    # Xentop states are:
+    #  'd' – domain is dying
+    #  's' – domain shutting down
+    #  'b' – blocked domain
+    #  'c' – domain crashed
+    #  'p' – domain paused
+    #  'r' – domain is actively ruining on one of the CPU
+    def self.get_state(state)
+        case state.gsub('-', '')[-1..-1]
+        when *%w{r b s d p}
+            'a'
+        when 'c'
+            'e'
+        else
+            '-'
+        end
+    end
+
+    def self.get_vm_list_long
+        return {} if !JSON_LOADED
+
+        text = `#{CONF['XM_LIST']} -l`
+        doms = JSON.parse(text)
+    end
+
+    def self.get_vm_templates(doms)
+        dom_tmpl = {}
+
+        doms.each do |dom|
+            name = dom['config']['c_info']['name']
+            name = URI.escape(name)
+
+            tmp = %Q<NAME = "#{name}"\n>
+            tmp << %Q<IMPORT_VM_ID = "#{name}"\n>
+
+            vcpus = dom['config']['b_info']['max_vcpus'].to_i
+            vcpus = 1 if vcpus < 1
+
+            tmp << %Q<CPU = #{vcpus}\n>
+            tmp << %Q<VCPU = #{vcpus}\n>
+
+            memory = dom['config']['b_info']['max_memkb']
+            memory /= 1024
+
+            tmp << %Q<MEMORY = #{memory}\n>
+
+            dom_tmpl[name] = tmp
+        end
+
+        dom_tmpl
+    end
+
+    def self.get_vm_disk_stats(doms)
+        dom_disk_stats = {}
+
+        doms.each do |dom|
+            data = {
+                :disk_size       => [],
+                :snapshot_size   => []
+            }
+
+            dom['config']['disks'].each do |disk|
+                next if !disk['pdev_path']
+
+                path = disk['pdev_path']
+
+                text = `qemu-img info --output=json #{path}`
+                next if !$? || !$?.success?
+
+                json = JSON.parse(text)
+
+                disk_id = path.split(".")[-1]
+
+                disk_size = json['actual-size'].to_f/1024/1024
+
+                data[:disk_size] << {:id => disk_id, :size => disk_size.round}
+            end
+
+
+            data
+        end
+
+        dom_disk_stats
+    end
+end
+
+################################################################################
+# Functions to interface hypervisor information
+################################################################################
+
+# Selects the hypervisor to be used based on the arguments or probe location
+# This function also loads the associated configuration variables.
+# @return [Module] with the hypervisor XEN, KVM
+def setup_hypervisor
+    hypervisor = nil
+    params     = ARGV.clone
+
+    params.each_with_index do |param, index|
+        case param
+            when '--kvm'
+                hypervisor = KVM
+                ARGV.delete_at(index)
+            when '--xen'
+                hypervisor = XEN
+                ARGV.delete_at(index)
+        end
+    end
+
+    if !hypervisor
+        case $0
+            when %r{/vmm\/kvm/}
+                hypervisor=KVM
+            when %r{/vmm\/xen\d?/}
+                hypervisor=XEN
+        end
+    end
+
+    case hypervisor.name
+        when 'XEN'
+            file = 'xenrc'
+            vars = %w{XM_POLL XM_LIST}
+        when 'KVM'
+            file = 'kvmrc'
+            vars = %w{LIBVIRT_URI}
+        else
+            return nil
+    end
+
+    # Load the rc variables and override the default values
+    begin
+        env   = `. #{File.dirname($0)+"/#{file}"};env`
+        lines = env.split("\n")
+
+        vars.each do |var|
+            lines.each do |line|
+                if a = line.match(/^(#{var})=(.*)$/)
+                    hypervisor::CONF[var] = a[2]
+                    break
+                end
+            end
+        end
+    rescue
+    end
+
+    return hypervisor
+end
+
+# Returns an OpenNebula monitor string
+# @param name [String] of the monitor metric
+# @param value [String] of the monitor metric
+# @return [String, nil]
+def print_data(name, value)
+    return nil if value.nil? || (value.respond_to?(:empty?) && value.empty?)
+
+    if value.instance_of? Array
+        data_str = ""
+        value.each do |v|
+            data_str += print_data(name, v)
+        end
+
+        return data_str
+    elsif value.instance_of? Hash
+        values = value.map do |k,v|
+            "#{k.to_s.upcase}=#{v}"
+        end.join(", ")
+
+        return "#{name.to_s.upcase}=[ #{values} ] "
+    else
+        return "#{name.to_s.upcase}=#{value}"
+    end
+end
+
+# Puts to STDOUT a string in the form "VAL1=VAR1 VAL2=VAR2" with the monitor
+# attributes of the VM
+# @param hypervisor [Module]
+# @param vm_id [String] with the VM ID
+def print_one_vm_info(hypervisor, vm_id)
+    info = hypervisor.get_vm_info(vm_id)
+
+    exit(-1) if !info
+
+    values = info.map do |key, value|
+        print_data(key, value)
+    end
+
+    puts values.zip.join(' ')
+end
+
+def print_all_vm_info(hypervisor)
+    require 'yaml'
+    require 'zlib'
+
+    vms = hypervisor.get_all_vm_info
+
+    return nil if vms.nil?
+
+    compressed = Zlib::Deflate.deflate(vms.to_yaml)
+
+    puts Base64.encode64(compressed).delete("\n")
+end
+
+def print_all_vm_template(hypervisor)
+    vms=hypervisor.get_all_vm_info
+
+    return nil if vms.nil?
+
+    puts "VM_POLL=YES"
+
+    vms.each do |name, data|
+        number = -1
+
+        if (name =~ /^one-\d*$/)
+            number = name.split('-').last
+        end
+
+        vm_name = data[:vm_name]
+
+        string  = "VM=[\n"
+        string << "  ID=#{number},\n"
+        string << "  DEPLOY_ID=#{name},\n"
+        string << %Q(  VM_NAME="#{vm_name}",\n) if vm_name
+
+        if data[:template]
+            string << %Q(  IMPORT_TEMPLATE="#{data[:template]}",\n)
+            data.delete(:template)
+        end
+
+        values = data.map do |key, value|
+            print_data(key, value)
+        end
+
+        monitor = values.zip.join(' ')
+
+        string << "  POLL=\"#{monitor}\" ]"
+
+        puts string
+    end
+end
+
+################################################################################
+# MAIN PROGRAM
+################################################################################
+
+hypervisor = Xen
+file       = 'xenrc'
+vars       = %w{XM_POLL XM_LIST}
+
+load_vars(hypervisor, file, vars)
+
+vm_id = ARGV[0]
+
+if vm_id == '-t'
+    print_all_vm_template(hypervisor)
+elsif vm_id
+    print_one_vm_info(hypervisor, vm_id)
+else
+    print_all_vm_info(hypervisor)
+end

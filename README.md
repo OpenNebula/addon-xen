@@ -32,9 +32,13 @@ To install this add-on, clone it and run install.sh:
 
     sudo ./install.sh -u oneadmin -g oneadmin
 
-You wil need to add the following to `/etc/one/oned.conf`: TODO
+You wil need to add the following to `/etc/one/oned.conf`: [oned.conf for Xen](oned-xen.conf)
 
-## Configuring
+## Usage
+
+The usage guide can be found here: [Xen Driver](docs/xeng.rst)
+
+## Configuration
 
 There are two configuration files:
 
@@ -44,6 +48,3 @@ There are two configuration files:
 ## Development
 
 To contribute bug patches or new features, you can use the github Pull Request model. It is assumed that code and documentation are contributed under the Apache License 2.0.
-
-More info:
-TODO

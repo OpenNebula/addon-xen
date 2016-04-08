@@ -4,10 +4,6 @@ Xen Driver
 
 The `XEN hypervisor <http://www.xen.org>`__ offers a powerful, efficient and secure feature set for virtualization of x86, IA64, PowerPC and other CPU architectures. It delivers both paravirtualization and full virtualization. This guide describes the use of Xen with OpenNebula, please refer to the Xen specific documentation for further information on the setup of the Xen hypervisor itself.
 
-.. note::
-
-  Document: parameters to add a host, install opennebula-common, compatible with udp-push.
-
 Requirements
 ============
 
@@ -85,6 +81,15 @@ OpenNebula needs to know if it is going to use the XEN Driver. There are two set
 
 Usage
 =====
+
+To add a Xen host to OpenNebula you will need to add the Xen Drivers to the configuration file and then run:
+
+.. code::
+
+    onehost <the_xen_host> -i xen -v xen
+
+    # or for OpenNebula < 5.0
+    onehost <the_xen_host> -i xen -v xen -n <net_driver>
 
 The following are template attributes specific to Xen, please refer to the :ref:`template reference documentation <template>` for a complete list of the attributes supported to define a VM.
 

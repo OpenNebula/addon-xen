@@ -88,6 +88,9 @@ do_file() {
             ln -fs $SRC_DIR/$1 $2
         else
             cp -R $SRC_DIR/$1 $2
+            if [[ "$ONEADMIN_USER" != "0" || "$ONEADMIN_GROUP" != "0" ]]; then
+                chown -R $ONEADMIN_USER:$ONEADMIN_GROUP $2
+            fi
         fi
     fi
 }

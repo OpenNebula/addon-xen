@@ -376,7 +376,7 @@ end
 # MAIN PROGRAM
 ################################################################################
 
-hypervisor = Xen
+hypervisor = XEN
 file       = 'xenrc'
 vars       = %w{XM_POLL XM_LIST}
 

@@ -27,7 +27,7 @@ module VNMNetwork
     # A NIC using Xen. This class implements functions to get the physical interface
     # that the NIC is using
     class NicXen < Hash
-        VNMNetwork::HYPERVISORS["kvm"] = self
+        VNMNetwork::HYPERVISORS["xen"] = self
 
         def initialize
             super(nil)

@@ -61,10 +61,8 @@ module VNMNetwork
                     iface_id  = n[0]
                     iface_mac = n[2]
 
-                    if iface_mac == self[:mac]
-                        self[:tap] = "vif#{domid}.#{iface_id}"
-                        break
-                    end
+                    self[:tap] = "vif#{domid}.#{iface_id}"
+                    break
                 end
             end
             self

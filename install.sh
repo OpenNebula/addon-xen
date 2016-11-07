@@ -87,7 +87,7 @@ do_file() {
         if [ "$LINK" = "yes" ]; then
             ln -fs $SRC_DIR/$1 $2
         else
-            cp -R $SRC_DIR/$1 $2
+            cp -Rv $SRC_DIR/$1 $2
             if [[ "$ONEADMIN_USER" != "0" || "$ONEADMIN_GROUP" != "0" ]]; then
                 chown -R $ONEADMIN_USER:$ONEADMIN_GROUP $2
             fi
@@ -126,7 +126,7 @@ cd `dirname $0`/src
 
 copy_files "im/xen.d/*" "$REMOTES_LOCATION/im/xen.d"
 copy_files "im/xen-probes.d/*" "$REMOTES_LOCATION/im/xen-probes.d"
-copy_files "vmm/*" "$REMOTES_LOCATION/xen"
+copy_files "vmm/*" "$REMOTES_LOCATION/vmm/xen"
 copy_files "vnm/*" "$REMOTES_LOCATION/vnm/vnmmad-load.d"
 
 LINK="no"

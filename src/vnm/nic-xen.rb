@@ -27,7 +27,7 @@ module VNMNetwork
     # A NIC using Xen. This class implements functions to get the physical interface
     # that the NIC is using
     class NicXen < Hash
-        VNMNetwork::HYPERVISORS["kvm"] = self
+        VNMNetwork::HYPERVISORS["xen"] = self
 
         def initialize
             super(nil)
@@ -61,10 +61,8 @@ module VNMNetwork
                     iface_id  = n[0]
                     iface_mac = n[2]
 
-                    if iface_mac == self[:mac]
-                        self[:tap] = "vif#{domid}.#{iface_id}"
-                        break
-                    end
+                    self[:tap] = "vif#{domid}.#{iface_id}"
+                    break
                 end
             end
             self
